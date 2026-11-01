@@ -1,4 +1,4 @@
-import { GEO } from './nairobi-geodata.js';
+import { GEO } from './kigali-geodata.js';
 import { MAP_LANDMARKS, getLocationLabel, isTypingInField } from './city-config.js';
 
 // Slop New York's nyc-map.js, ported to Nairobi: the radar (bottom left) and the full-screen street atlas ([M]), drawn

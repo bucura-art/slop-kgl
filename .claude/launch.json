@@ -2,13 +2,13 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "nairobitour",
+      "name": "kigalitour",
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8080", "--bind", "127.0.0.1"],
       "port": 8080
     },
     {
-      "name": "nairobitour-nocache",
+      "name": "kigalitour-nocache",
       "runtimeExecutable": "python3",
       "runtimeArgs": ["tools/serve-nocache.py", "8081"],
       "port": 8081

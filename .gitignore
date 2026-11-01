@@ -3,3 +3,4 @@ node_modules/
 *.tmp.*
 # The captured 3D map models the heights and landmark meshes were taken from (tools/import-models.mjs): 247 MB
 Nairobi CBD Obj/
+config.bat

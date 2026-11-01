@@ -1,4 +1,4 @@
-import { GEO } from './nairobi-geodata.js';
+import { GEO } from './kigali-geodata.js';
 import { SIGNAL_TIMING } from './city-config.js';
 import { nodeLift, liftAlong, liftBreaks } from './elevation.js';
 
@@ -8,11 +8,12 @@ import { nodeLift, liftAlong, liftBreaks } from './elevation.js';
 // Slop New York's road-network.js (MIT, © 2026 Mr.doob), keeping its centreline pipeline and dropping Manhattan's grid.
 //
 // Conventions: north = -z, east = +x. Every directed edge has a unit direction (dx, dz) and a right normal
-// (rx, rz) = (-dz, dx). Lanes are lateral offsets to the right of the centreline, sorted left to right. Kenya drives
-// on the left, so a two-way road's lanes each way lie left of its centreline (negative offsets) and a one-way road's
-// are centred on it. Nodes and edges are flat in (x, z); every node carries its `lift` (m over the ground,
+// (rx, rz) = (-dz, dx). Lanes are lateral offsets to the right of the centreline, sorted left to right. Each direction
+// uses the side of the centreline set by GEO.frame.drivesOn; one-way roads use their full carriageway. Nodes and edges
+// are flat in (x, z); every node carries its `lift` (m over the ground,
 // elevation.js) so the traffic can follow the Expressway's decks and ramps.
 
+const DRIVING_SIDE = GEO.frame?.drivesOn === 'right' ? 1 : -1;
 const CELL = 32;
 const LANE_CLEAR = 1.2; // half width each lane keeps free of obstacles
 const CROSSWALK = 2.5; // depth between a junction and its stop lines
@@ -165,7 +166,7 @@ function buildRoadNetwork(sidewalks = [], obstacles = [], signalIntersections = 
       return node;
     }
     // Lanes by the road's lane count and width: a one-way road's centred on it, a two-way road's half each way, on the
-    // left of its centreline
+    // configured driving side of its centreline.
     function lanesOf(l) {
       const half = Math.max(l.w, 3) / 2;
       const axis = l.rank >= MAJOR ? 'ave' : 'st';
@@ -178,7 +179,7 @@ function buildRoadNetwork(sidewalks = [], obstacles = [], signalIntersections = 
       }
       const n = Math.min(MAX_LANES, Math.max(1, Math.floor(total / 2)));
       const step = clamp(l.w / (2 * n), 2.8, 3.6);
-      const each = Array.from({ length: n }, (_, i) => -(step / 2 + (n - 1 - i) * step)); // kerb lane first
+      const each = Array.from({ length: n }, (_, i) => DRIVING_SIDE * (step / 2 + (n - 1 - i) * step));
       return { half, axis, fwd: each, back: each, centred: false };
     }
     const DEG = Math.PI / 180;
@@ -269,13 +270,15 @@ function buildRoadNetwork(sidewalks = [], obstacles = [], signalIntersections = 
       general: true, cand: lanes, divided: !!r.divided, centred: r.centred, rank: r.rank, ring: r.ring, vmax: r.vmax
     });
   }
-  // Lanes of a one-way roadway moved left of a centreline, as on a two-way road: the inner lane half a lane out
-  const leftOf = (lanes) => {
+  // Lanes of a one-way roadway moved to the driving side of its centreline.
+  const drivingSideOf = (lanes) => {
     const keep = lanes.length > 1 ? (lanes[1] - lanes[0]) / 2 : 1.65;
-    return lanes.map((x) => x - lanes[lanes.length - 1] - keep);
+    return DRIVING_SIDE > 0
+      ? lanes.map((x) => x - lanes[0] + keep)
+      : lanes.map((x) => x - lanes[lanes.length - 1] - keep);
   };
   // A divided road drawn as two one-way roadways between the same two junctions runs both ways along one centreline
-  // here: each way keeps to the left of it, as on a two-way road, and the road is as wide as both roadways
+  // here: each way keeps to its driving side, and the road is as wide as both roadways.
   const travel = (r) => (r.fwd.length ? [r.from, r.to] : [r.to, r.from]);
   const oneWays = new Map(); // node -> next node -> the one-way run from one to the other
   for (const r of genRuns) {
@@ -290,8 +293,8 @@ function buildRoadNetwork(sidewalks = [], obstacles = [], signalIntersections = 
     const o = oneWays.has(b) && oneWays.get(b).get(a);
     if (!o || o.divided || o.ring) continue;
     for (const q of [r, o]) {
-      if (q.fwd.length) q.fwd = leftOf(q.fwd);
-      else q.back = leftOf(q.back);
+      if (q.fwd.length) q.fwd = drivingSideOf(q.fwd);
+      else q.back = drivingSideOf(q.back);
       q.divided = true;
       q.centred = false;
     }
@@ -390,7 +393,7 @@ function buildRoadNetwork(sidewalks = [], obstacles = [], signalIntersections = 
     for (const [e, { half, offset }] of partner) {
       e.x0 += e.rx * offset / 2;
       e.z0 += e.rz * offset / 2;
-      e.lanes = leftOf(e.cand).filter((o) => laneOpen(e.x0, e.z0, e.dx, e.dz, e.span, o));
+      e.lanes = drivingSideOf(e.cand).filter((o) => laneOpen(e.x0, e.z0, e.dx, e.dz, e.span, o));
       e.half += half;
       if (e.half >= 7.25) e.axis = 'ave'; // as wide as a main road
       e.divided = true;

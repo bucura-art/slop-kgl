@@ -10,8 +10,9 @@ const { loadModule } = require('./helpers/module.cjs');
 const source = readFileSync(join(__dirname, '../js/controllers.js'), 'utf8');
 const collidersSource = readFileSync(join(__dirname, '../js/colliders.js'), 'utf8');
 
-// GEO.terrain spans -500..500 m both ways (ground modes keep 30 m inside it), with one Kenyatta Avenue to spawn on
+// GEO.terrain spans -500..500 m both ways (ground modes keep 30 m inside it), with one named road to spawn on
 const GEO = {
+  frame: { drivesOn: 'right' },
   terrain: { x0: -500, z0: -500, nx: 41, nz: 41, cell: 25 },
   roadGraph: { links: [{ name: 'Kenyatta Avenue', oneway: 1, w: 7.6, pts: [-100, 0, 100, 0] }] }
 };
@@ -26,7 +27,7 @@ function buildWorld(boxes = [], { ground = 0, decks = [] } = {}) {
   }));
   const { buildColliders, wallContact } = loadModule(collidersSource, {
     imports: {
-      './nairobi-geodata.js': { GEO: { buildings } },
+      './kigali-geodata.js': { GEO: { buildings } },
       './terrain.js': { heightAt: () => ground },
       './street-geometry.js': { pavementLift: () => 0 },
       './buildings.js': { footings: () => new Map(buildings.map((b) => [b, 0])) },
@@ -52,7 +53,7 @@ function eventTarget() {
 function keyboardHarness(world = buildWorld()) {
   const window = eventTarget();
   const document = { ...eventTarget(), hidden: false };
-  const { ThirdPersonControllerManager } = loadModule(source, {
+  const { ThirdPersonControllerManager, roadSpawn } = loadModule(source, {
     globals: { window, document },
     imports: {
       'three/webgpu': {},
@@ -62,7 +63,7 @@ function keyboardHarness(world = buildWorld()) {
       './pedestrians.js': {},
       './vehicle-lights.js': {},
       './colliders.js': { wallContact: world.wallContact },
-      './nairobi-geodata.js': { GEO }
+      './kigali-geodata.js': { GEO }
     }
   });
   // Exercise the production event handlers without constructing the scene's 3D models.
@@ -73,6 +74,7 @@ function keyboardHarness(world = buildWorld()) {
   controller.bindKeyboard();
   return {
     controller,
+    roadSpawn,
     window,
     document,
     key(type, code, tagName = 'BODY') {
@@ -80,6 +82,12 @@ function keyboardHarness(world = buildWorld()) {
     }
   };
 }
+
+test('right-hand traffic spawns on the right side of its road', () => {
+  const { roadSpawn } = keyboardHarness();
+  const [x, z] = roadSpawn('Kenyatta Avenue', 0, 0);
+  assert.ok(Math.abs(x) < 1e-9 && z > 0, 'eastbound traffic should spawn south of the centreline');
+});
 
 test('releasing a movement key after focusing search stops movement', () => {
   const { controller, key } = keyboardHarness();

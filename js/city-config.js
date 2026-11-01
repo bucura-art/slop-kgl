@@ -1,4 +1,4 @@
-import { GEO } from './nairobi-geodata.js';
+import { GEO } from './kigali-geodata.js';
 
 // Nairobi-specific settings shared by the traffic, pedestrians, player and HUD: traffic signal timing and where the
 // signals are, where a place is (street names and landmarks), the teleport destinations and the map's landmarks. Slop
@@ -183,7 +183,7 @@ function getLocationLabel(x, z) {
   return place && roads ? `${place} · ${roads}` : place || roads || 'Nairobi';
 }
 
-// Teleport destinations: a landmark, and the road the player arrives on (in its left-hand lane, facing along it: see
+// Teleport destinations: a landmark, and the road the player arrives on (in its driving-side lane, facing along it: see
 // roadSpawn in controllers.js) nearest (x, z)
 const TELEPORT_LOCATIONS = Object.fromEntries([
   ['kicc', 'Kenyatta International Convention Centre', 'Harambee Avenue · City Square', 'Harambee Avenue', 2, -15],

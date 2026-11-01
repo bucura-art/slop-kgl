@@ -14,7 +14,7 @@ import {
 import { PersonCrowd, PersonRig } from './pedestrians.js';
 import { HEADLIGHTS, createVehicleHeadlight, placeVehicleHeadlight } from './vehicle-lights.js';
 import { wallContact } from './colliders.js';
-import { GEO } from './nairobi-geodata.js';
+import { GEO } from './kigali-geodata.js';
 
 // Slop New York's controllers.js (MIT, © 2026 Mr.doob), adapted for Nairobi: player models, animation and movement for
 // walking, driving, cycling and flying, on the terrain and the Expressway decks, with the buildings as colliders
@@ -31,13 +31,15 @@ const BOUNDS = { minX: T.x0, minZ: T.z0, maxX: T.x0 + (T.nx - 1) * T.cell, maxZ:
 const HELI_MARGIN = 3000;
 const HELI_CEILING = 600; // m over KICC's ground
 
-// A point on the named road nearest (x, z), in its left lane, facing the way it runs (the spawn and the teleports).
+// A point on the named road nearest (x, z), in its driving-side lane, facing the direction of travel.
 // Returns [x, z, heading, left x, left z] (left: the unit vector to the kerb on the left).
 export function roadSpawn(name, x, z) {
+  const hasNamedRoad = GEO.roadGraph.links.some((l) => l.name === name);
   let best = null;
   let bd = Infinity;
   for (const l of GEO.roadGraph.links) {
-    if (l.name !== name) continue;
+    if (hasNamedRoad && l.name !== name) continue;
+    if (!hasNamedRoad && !['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'unclassified', 'residential', 'living_street'].includes(l.kind)) continue;
     const p = l.pts;
     for (let i = 0; i < p.length - 2; i += 2) {
       const ax = p[i], az = p[i + 1], dx = p[i + 2] - ax, dz = p[i + 3] - az;
@@ -46,14 +48,16 @@ export function roadSpawn(name, x, z) {
       if (d < bd) [bd, best] = [d, { l, x: ax + dx * t, z: az + dz * t, dx, dz }];
     }
   }
+  if (!best) throw new Error(`No drivable road is available for spawn near (${x}, ${z})`);
   const len = Math.hypot(best.dx, best.dz);
-  const fx = best.dx / len, fz = best.dz / len;
-  // Kenya drives on the left: on a two-way road, half a lane's width left of the centre line
-  const off = best.l.oneway ? -best.l.w / 4 : best.l.w / 4;
-  return [best.x + fz * off, best.z - fx * off, Math.atan2(fx, fz), fz, -fx];
+  const direction = best.l.oneway === -1 ? -1 : 1;
+  const fx = (best.dx / len) * direction, fz = (best.dz / len) * direction;
+  const side = GEO.frame?.drivesOn === 'right' ? -1 : 1;
+  const off = (best.l.w || 0) / 4;
+  return [best.x + fz * off * side, best.z - fx * off * side, Math.atan2(fx, fz), fz, -fx];
 }
 
-// Spawn on Kenyatta Avenue, heading south-east towards Moi Avenue
+// Prefer the old named avenue where present; otherwise spawn on the nearest mapped Kigali driving road.
 const SPAWN = roadSpawn('Kenyatta Avenue', -110, -505);
 const spawnAt = (ahead, left) => [SPAWN[0] + Math.sin(SPAWN[2]) * ahead + SPAWN[3] * left, SPAWN[1] + Math.cos(SPAWN[2]) * ahead + SPAWN[4] * left];
 const groundCollider = { type: 'ground' };

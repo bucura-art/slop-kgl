@@ -1,4 +1,4 @@
-import { GEO } from './nairobi-geodata.js';
+import { GEO } from './kigali-geodata.js';
 
 // Ground height (m, relative to KICC's ground) anywhere in the world frame, clamped at GEO.terrain's edges. It follows
 // the terrain mesh's own triangles (ground.js): each 25 m cell is split along its diagonal from (i + 1, j) to (i, j + 1),

@@ -3,7 +3,7 @@ import { pass, mrt, output, normalView, positionView, metalness, roughness, vec2
 import { ssr } from 'three/addons/tsl/display/SSRNode.js';
 import { ClusteredLighting } from 'three/addons/lighting/ClusteredLighting.js';
 import { createPostProcessing } from './post-processing.js';
-import { GEO } from './nairobi-geodata.js';
+import { GEO } from './kigali-geodata.js';
 import { heightAt } from './terrain.js';
 import { buildGround } from './ground.js';
 import { buildBuildings, roofOf } from './buildings.js';
@@ -435,7 +435,7 @@ teleportButtons.forEach((btn) => {
   btn.addEventListener('click', () => {
     const loc = TELEPORT_LOCATIONS[btn.getAttribute('data-teleport')];
     if (loc) {
-      // on the destination's road, in its left lane, facing along it
+      // on the destination's road, in its driving-side lane, facing along it
       const [x, z, heading] = roadSpawn(loc.road, loc.x, loc.z);
       teleportTo(x, z, heading);
     }

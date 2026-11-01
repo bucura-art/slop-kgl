@@ -6,7 +6,7 @@ import { signalPhase, walkSignal } from './city-config.js';
 import { cityUniforms, createContactShadowMaterial } from './tsl-materials.js';
 import { heightAt } from './terrain.js';
 import { roadHeight } from './elevation.js';
-import { GEO } from './nairobi-geodata.js';
+import { GEO } from './kigali-geodata.js';
 import { HEADLIGHTS, createVehicleHeadlight, placeVehicleHeadlight } from './vehicle-lights.js';
 import {
   BODY_SPECS,
@@ -32,15 +32,15 @@ import {
 // Cars and buses follow the road graph, obey signals, yield at crossings and react to collisions.
 // Vehicles replenish around the player; pedestrian-system.js manages the nearby walking population.
 //
-// Slop New York's traffic.js (MIT, © 2026 Mr.doob), adapted for Nairobi: driving on the left (the turn across oncoming
-// traffic is a right turn, ACROSS), roundabouts (road-network.js makes the ring the main road, so traffic entering
+// Slop New York's traffic.js (MIT, © 2026 Mr.doob), adapted for Kigali: driving on the right (the turn across oncoming
+// traffic is a left turn, ACROSS), roundabouts (road-network.js makes the ring the main road, so traffic entering
 // gives way to it), every signal on its own cycle offset, and vehicles on the terrain and the Expressway's decks (each
 // sits at the road's height under its axles and pitches with the slope, elevation.js). No taxis or NYPD: Kenyan police
 // cars, matatus (one vehicle in five: minibuses, keener drivers), boda bodas (motorbike taxis, leaning into turns) and a
 // city bus.
 
-// Kenya drives on the left: turning right crosses the oncoming lanes, turning left keeps to the kerb
-const ACROSS = 'R';
+// In right-hand traffic, left turns cross oncoming lanes; in left-hand traffic, right turns do.
+const ACROSS = GEO.frame?.drivesOn === 'right' ? 'L' : 'R';
 
 const NUM_CARS = 200;
 const NUM_BUSES = 12;
@@ -800,7 +800,7 @@ function createTrafficSystem(scene, sidewalks = [], obstacles = [], signalInters
     return impatient ? canStopBefore(o.v, d) : d > (sp * sp) / 5 + sp + 3;
   }
 
-  // A right turn (across oncoming traffic, driving on the left) waits for oncoming traffic going straight or left
+  // The across-oncoming turn waits for oncoming traffic going straight or turning toward the same side.
   // (approach o); vehicles not on o yet haven't picked their way on, and at a red, only police and those already
   // committed to crossing still come. Waiting at the line, v also takes turns with those waiting at theirs: whoever has
   // waited longer goes first, if it has room to go.
@@ -821,7 +821,7 @@ function createTrafficSystem(scene, sidewalks = [], obstacles = [], signalInters
   }
 
   // How far along curve c, out of two-way edge e, v can pull forward before its front right corner reaches the
-  // oncoming lanes (right of the centre line, driving on the left): where it waits for a gap to turn right
+  // oncoming lanes: where it waits for a gap to make the across-oncoming turn
   const corner = { x: 0, z: 0, dx: 0, dz: 1 };
   function yieldPoint(v, c, e) {
     let cs = 0;

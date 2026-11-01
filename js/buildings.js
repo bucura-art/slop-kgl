@@ -1,8 +1,7 @@
 import * as THREE from 'three/webgpu';
-import { GEO } from './nairobi-geodata.js';
+import { GEO } from './kigali-geodata.js';
 import { baseOf } from './terrain.js';
 import { createFacadeMaterial } from './tsl-materials.js';
-import { MODEL_HEIGHTS, MODEL_BUILDINGS } from './nairobi-models.js';
 
 // Every building as one merged mesh: walls extruded from the footprint ring (and courtyard holes), a parapet round a
 // flat roof, and on the bigger roofs a lift motor room. The facade material (tsl-materials.js createFacadeMaterial)
@@ -11,38 +10,6 @@ import { MODEL_HEIGHTS, MODEL_BUILDINGS } from './nairobi-models.js';
 //
 // A building stands on the lowest point of its footprint, so on a slope its uphill side sinks into the ground instead
 // of the downhill side floating. The pieces of one tower (its building:parts and podium) share one footing.
-
-// The captured 3D map models of the CBD (tools/import-models.mjs): a measured roof height for the buildings whose
-// OSM height was an estimate, and the landmark towers whose OSM outlines don't do them justice, drawn from the models'
-// own meshes instead
-for (const b of GEO.buildings) {
-  const h = MODEL_HEIGHTS[b.id];
-  if (h && b.est) {
-    b.h = h;
-    b.est = 0;
-    b.modelled = 1;
-  }
-}
-// (by every OSM name each stands for: a raw one, KICC, takes in its amphitheatre)
-// Sloped roofing on the captured towers (reference photographs): KICC's amphitheatre cone and crown are terracotta
-const SLOPE_TINT = { 'Kenyatta International Convention Centre': '#9c6342', 'KICC Amphitheater': '#9c6342' };
-// ...and crowns above a height (m over the footing) of their own: CBK Pension Towers' golden louvred screens
-const CROWN = { 'CBK Pension Towers': [100, '#c9a248'] };
-const MODELLED = new Map(MODEL_BUILDINGS.flatMap((m) => (m.names || [m.name]).map((n) => [n, m])));
-// The remeshed towers stand where their prisms are: those replace their OSM outlines in GEO.buildings as building
-// parts (one per prism, sharing the tower's name, so one footing), and so become their colliders, roofs and map
-// outlines too. The raw ones keep their OSM parts for all that, and are only drawn from the capture.
-for (let i = GEO.buildings.length - 1; i >= 0; i--) if (MODELLED.get(GEO.buildings[i].name)?.levels) GEO.buildings.splice(i, 1);
-// (a raw tower's OSM parts, its colliders, come down to its captured roof: a part above it a thin slab on top)
-for (const b of GEO.buildings) {
-  const m = MODELLED.get(b.name);
-  if (!m?.raw || !m.roof || b.name !== m.name) continue;
-  if ((b.minH || 0) >= m.roof - 0.5) b.minH = m.roof - 0.5;
-  b.h = Math.min(b.h, m.roof);
-}
-for (const m of MODEL_BUILDINGS) {
-  (m.levels || []).forEach((l, k) => GEO.buildings.push({ id: 9e9 + MODEL_BUILDINGS.indexOf(m) * 100 + k, name: m.name, ring: l.ring, holes: l.holes, h: l.y, part: 1, modelPart: 1 }));
-}
 
 // A point on a building's roof, for nairobi.roof() (main.js): the middle of its footprint's largest triangle, at its top
 let roofBase = null;
@@ -59,21 +26,6 @@ export function roofOf(b) {
   const [p, q, r] = best || [pts[0], pts[0], pts[0]];
   return { x: (p.x + q.x + r.x) / 3, z: (p.y + q.y + r.y) / 3, y: roofBase.get(b) + b.h };
 }
-// Their meshes, from nairobi-models.bin: flat [x, y, z, ...] triangles in world metres
-async function loadModelMeshes() {
-  if (!MODEL_BUILDINGS.length) return;
-  const buf = await (await fetch(new URL('./nairobi-models.bin', import.meta.url))).arrayBuffer();
-  for (const m of MODEL_BUILDINGS) {
-    const q = new Uint16Array(buf, m.offset, m.verts * 3);
-    const indexAt = m.offset + ((m.verts * 6 + 3) & ~3);
-    const idx = m.wide ? new Uint32Array(buf, indexAt, m.faces * 3) : new Uint16Array(buf, indexAt, m.faces * 3);
-    const tris = new Float32Array(m.faces * 9);
-    const s = [0, 1, 2].map((c) => (m.hi[c] - m.lo[c]) / 65535);
-    for (let i = 0; i < idx.length; i++) for (let c = 0; c < 3; c++) tris[3 * i + c] = m.lo[c] + q[3 * idx[i] + c] * s[c];
-    m.tris = tris;
-  }
-}
-
 // Facade styles the material knows (its `wall.z`): painted render with punched windows, concrete offices with piers,
 // glass curtain walls, roofs, plain walls, concrete with ribbon windows between continuous bands, and glass between
 // vertical concrete fins
@@ -204,11 +156,8 @@ function inset(ring, d) {
 }
 
 export async function buildBuildings() {
-  await loadModelMeshes();
   const base = footings();
-  // two sets of attributes: everything, and the raw captured towers (drawn two-sided)
-  const sets = [0, 1].map(() => ({ pos: [], nrm: [], tint: [], wuv: [], wall: [], dims: [] }));
-  let out = sets[0];
+  const out = { pos: [], nrm: [], tint: [], wuv: [], wall: [], dims: [] };
   let look = null;
   const push = (p, n, uv, w) => {
     out.pos.push(p[0], p[1], p[2]);
@@ -263,59 +212,7 @@ export async function buildBuildings() {
     flat(toV2(c), [], y1);
   };
 
-  // The landmark towers from the models: their triangles over the tower's footing, roofs and walls told apart by
-  // their normals, each wall's frame measured along its own direction (the mesh has no wall ends, so every wall is
-  // "a hundred kilometres" wide: the facade's bays just run along it)
-  const drawn = new Set();
-  const modelled = (b) => {
-    const m = MODELLED.get(b.name);
-    if (!m || drawn.has(m)) return !!m;
-    drawn.add(m);
-    look = appearance(b);
-    const y0 = base.get(b);
-    out = m.raw ? sets[1] : sets[0];
-    const t = m.tris;
-    for (let i = 0; i < t.length; i += 9) {
-      const ax = t[i], ay = t[i + 1], az = t[i + 2], bx = t[i + 3], by = t[i + 4], bz = t[i + 5], cx = t[i + 6], cy = t[i + 7], cz = t[i + 8];
-      const ux = bx - ax, uy = by - ay, uz = bz - az, vx = cx - ax, vy = cy - ay, vz = cz - az;
-      let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
-      const l = Math.hypot(nx, ny, nz);
-      if (l < 1e-6) continue;
-      nx /= l; ny /= l; nz /= l;
-      // (a remeshed tower's triangles all face up or out; a raw one's either way: drawn two-sided, a roof is a roof)
-      if (!m.raw && ny < -0.5) continue;
-      const N = [nx, ny, nz];
-      if (Math.abs(ny) > 0.9) {
-        for (const [x, y, z] of [[ax, ay, az], [bx, by, bz], [cx, cy, cz]]) push([x, y0 + y, z], N, [x, z], [1, 1, STYLE.roof]);
-        continue;
-      }
-      const crown = CROWN[b.name];
-      if (crown && Math.min(ay, by, cy) >= crown[0] - 0.5) {
-        const wall = look;
-        look = { ...look, tint: new THREE.Color().setStyle(crown[1], THREE.SRGBColorSpace) };
-        for (const [x, y, z] of [[ax, ay, az], [bx, by, bz], [cx, cy, cz]]) push([x, y0 + y, z], N, [x, z], [1e5, m.top, STYLE.plain]);
-        look = wall;
-        continue;
-      }
-      // a sloped face (a cone, a flared crown) is roofing, not a wall of windows
-      if (Math.abs(ny) > 0.3) {
-        const wall = look;
-        look = { ...look, tint: SLOPE_TINT[b.name] ? new THREE.Color().setStyle(SLOPE_TINT[b.name], THREE.SRGBColorSpace) : look.tint.clone().multiplyScalar(0.75) };
-        for (const [x, y, z] of [[ax, ay, az], [bx, by, bz], [cx, cy, cz]]) push([x, y0 + y, z], N, [x, z], [1e5, m.top, STYLE.plain]);
-        look = wall;
-        continue;
-      }
-      const hl = Math.hypot(nx, nz) || 1;
-      const dx = -nz / hl, dz = nx / hl; // along the wall
-      // (the running coordinate stays positive and well inside the "wall's" width, so no corner pier appears)
-      for (const [x, y, z] of [[ax, ay, az], [bx, by, bz], [cx, cy, cz]]) push([x, y0 + y, z], N, [x * dx + z * dz + 20000, y], [1e5, m.top, look.style]);
-    }
-    out = sets[0];
-    return true;
-  };
-
   for (const b of GEO.buildings) {
-    if (b.name && modelled(b)) continue;
     const y0 = base.get(b) + (b.minH || 0);
     const y1 = base.get(b) + b.h;
     if (y1 - y0 < 0.5) continue;
@@ -362,12 +259,5 @@ export async function buildBuildings() {
     mesh.matrixAutoUpdate = false;
     return mesh;
   };
-  const mesh = meshOf(sets[0], 'buildings', createFacadeMaterial());
-  if (sets[1].pos.length) {
-    const raw = createFacadeMaterial();
-    raw.side = THREE.DoubleSide;
-    raw.shadowSide = THREE.DoubleSide;
-    mesh.add(meshOf(sets[1], 'captured towers', raw));
-  }
-  return mesh;
+  return meshOf(out, 'buildings', createFacadeMaterial());
 }

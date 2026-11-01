@@ -3,12 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "fetch": "tools/fetch-geodata.sh && node tools/fetch-terrain.mjs",
-    "build": "node tools/build-geodata.mjs",
+    "build": "node init && node tools/build-geodata.mjs",
     "test": "node --test tests/*.test.cjs"
   },
   "devDependencies": {
-    "earcut": "^3.0.1",
     "geotiff": "2.1.3"
   }
 }

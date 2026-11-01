@@ -1,34 +1,91 @@
-// tools/build-geodata.mjs — writes js/nairobi-geodata.js from the OpenStreetMap extracts in tools/data/
-// usage: tools/fetch-geodata.sh && node tools/build-geodata.mjs [out.js]
-//
-// Inputs (tools/data/, fetched by tools/fetch-geodata.sh from the q_*.overpassql queries):
-//   osm_roads.json       every highway=* way in the bbox (carriageways, links, footways, steps)
-//   osm_buildings.json   building ways & multipolygon relations
-//   osm_building_parts.json  building:part ways (real tower heights) and the type=building relations grouping them
-//   osm_areas.json       parks, gardens, pitches, grass, woods, water bodies, parking
-//   osm_water_rail.json  rivers & streams, railway lines & platforms, stations, bus stops & matatu termini
-//   osm_landmarks.json   named landmarks, monuments, museums and every building with a height or 10+ levels
-//   osm_street.json      traffic signals, pedestrian crossings, street lamps, trees and tree rows
-//   dem_glo30.json       Copernicus GLO-30 elevation around the bbox (tools/fetch-terrain.mjs)
+// tools/build-geodata.mjs — builds the game data directly from the Kigali GeoJSON and elevation GeoTIFF.
+// usage: node tools/build-geodata.mjs [out.js]
 //
 // World frame: 1 unit = 1 m, x = east, z = south (north = -z, same handedness as Slop New York), y = up.
-// Origin at the Kenyatta International Convention Centre. Nairobi has no street grid, so the axes are not rotated.
-// Kenya drives on the left: GEO.frame.drivesOn = 'left'.
+// Origin at Kigali Convention Centre. Rwanda drives on the right: GEO.frame.drivesOn = 'right'.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { fromFile } from 'geotiff';
 
 const DATA = process.env.GEO_DATA || fileURLToPath(new URL('data/', import.meta.url));
-const OUT = process.argv[2] || fileURLToPath(new URL('../js/nairobi-geodata.js', import.meta.url));
+const GEOJSON = path.join(DATA, 'kgl-datasets-big-version.geojson');
+const TERRAIN_TIFF = path.join(DATA, 'kgl-around-kcc-elevation.tif');
+const OUT = process.argv[2] || fileURLToPath(new URL('../js/kigali-geodata.js', import.meta.url));
 const BBOX = JSON.parse(fs.readFileSync(fileURLToPath(new URL('bbox.json', import.meta.url)), 'utf8'));
-const load = (f) => JSON.parse(fs.readFileSync(path.join(DATA, f), 'utf8')).elements;
 const log = (...a) => console.log('[geodata]', ...a);
+const featureCollection = JSON.parse(fs.readFileSync(GEOJSON, 'utf8'));
+if (featureCollection.type !== 'FeatureCollection' || !Array.isArray(featureCollection.features)) {
+  throw new Error(`${GEOJSON} must be a GeoJSON FeatureCollection`);
+}
+
+function coordinate([lon, lat]) {
+  if (!Number.isFinite(lon) || !Number.isFinite(lat)) throw new Error('GeoJSON contains an invalid coordinate');
+  return { lon, lat };
+}
+function featureElement(feature, index) {
+  if (!feature.geometry || !feature.properties) throw new Error(`GeoJSON feature ${index} is missing geometry or properties`);
+  const idMatch = /^(node|way|relation)\/(\d+)$/.exec(feature.properties['@id'] || '');
+  const type = idMatch?.[1] || (feature.geometry.type === 'Point' ? 'node' : 'way');
+  const tags = { ...feature.properties };
+  delete tags['@id'];
+  const el = { type, id: idMatch ? Number(idMatch[2]) : index + 1, tags };
+  const { type: geometryType, coordinates } = feature.geometry;
+  if (geometryType === 'Point') {
+    [el.lon, el.lat] = coordinates;
+    coordinate([el.lon, el.lat]);
+  } else if (geometryType === 'LineString') {
+    el.geometry = coordinates.map(coordinate);
+  } else if (geometryType === 'Polygon') {
+    el.polygons = [coordinates.map((points) => points.map(coordinate))];
+  } else if (geometryType === 'MultiPolygon') {
+    el.polygons = coordinates.map((polygon) => polygon.map((points) => points.map(coordinate)));
+  } else {
+    throw new Error(`Unsupported GeoJSON geometry "${geometryType}" in feature ${index}`);
+  }
+  return el;
+}
+
+const elements = featureCollection.features.map(featureElement);
+const areaKinds = {
+  leisure: new Set(['park', 'garden', 'pitch', 'stadium']),
+  landuse: new Set(['grass', 'forest', 'recreation_ground', 'cemetery']),
+  natural: new Set(['water', 'wood', 'scrub', 'grassland'])
+};
+const input = {
+  'osm_roads.json': elements.filter((el) => el.tags.highway),
+  'osm_buildings.json': elements.filter((el) => el.tags.building && !el.tags['building:part']),
+  'osm_building_parts.json': elements.filter((el) => el.tags['building:part'] || el.tags.type === 'building'),
+  'osm_areas.json': elements.filter((el) =>
+    Object.entries(areaKinds).some(([tag, values]) => values.has(el.tags[tag])) || el.tags.amenity === 'parking'),
+  'osm_water_rail.json': elements.filter((el) =>
+    el.tags.waterway || el.tags.railway || el.tags.amenity === 'bus_station' ||
+    el.tags.highway === 'bus_stop' || el.tags.public_transport === 'station'),
+  'osm_landmarks.json': elements.filter((el) => {
+    const tags = el.tags;
+    return tags.name && (tags.tourism || tags.historic || tags.type === 'building' ||
+      (tags.building && (tags.height || Number(tags['building:levels']) >= 10 || Number(tags.floors) >= 10)));
+  }),
+  'osm_street.json': elements.filter((el) => {
+    const tags = el.tags;
+    return tags.highway === 'traffic_signals' || tags.highway === 'crossing' ||
+      tags.highway === 'street_lamp' || tags.crossing === 'traffic_signals' ||
+      tags.natural === 'tree' || tags.natural === 'tree_row' || tags.footway === 'crossing';
+  })
+};
+const load = (name) => {
+  if (!input[name]) throw new Error(`Unknown geodata input category: ${name}`);
+  return input[name];
+};
+const kcc = featureCollection.features.find((feature) =>
+  feature.properties?.name === 'Kigali Convention Centre' && feature.properties.building &&
+  feature.geometry?.type === 'Polygon');
+if (!kcc) throw new Error('GeoJSON does not contain a Kigali Convention Centre building footprint');
 
 // =====================================================================================================================
-// 1. FRAME — local tangent plane on the WGS84 ellipsoid around KICC
+// 1. FRAME — local tangent plane on the WGS84 ellipsoid around Kigali Convention Centre
 // =====================================================================================================================
-const LAT0 = -1.28866;
-const LON0 = 36.82307;
+const [LON0, LAT0] = centroid(kcc.geometry.coordinates[0].map(coordinate).map(({ lon, lat }) => [lon, lat]));
 const A = 6378137.0;
 const E2 = 6.69437999014e-3;
 const PHI0 = (LAT0 * Math.PI) / 180;
@@ -118,6 +175,12 @@ function stitch(ways) {
 }
 // Polygons of an element: [{ outer, holes }] in world metres
 function polygons(el) {
+  if (el.polygons) {
+    return el.polygons.map((poly) => ({
+      outer: geomToWorld(poly[0]),
+      holes: poly.slice(1).map(geomToWorld)
+    }));
+  }
   if (el.type === 'way') return el.geometry && el.geometry.length >= 4 ? [{ outer: geomToWorld(el.geometry), holes: [] }] : [];
   if (el.type !== 'relation' || !el.members) return [];
   const part = (role) => stitch(el.members.filter((m) => m.type === 'way' && m.geometry && (m.role || 'outer') === role).map((m) => geomToWorld(m.geometry)));
@@ -449,13 +512,27 @@ function buildStreet() {
 }
 
 // =====================================================================================================================
-// 7. TERRAIN — Copernicus GLO-30 (tools/fetch-terrain.mjs) filtered to bare ground, on a square world grid
+// 7. TERRAIN — supplied GeoTIFF filtered to bare ground, on a square world grid
 // =====================================================================================================================
 const TERRAIN_CELL = 25; // m
 const OPEN_R = 2; // cells (~60 m): the opening removes raised features narrower than ~120 m (blocks, towers, tree clumps)
-function buildTerrain() {
-  const D = JSON.parse(fs.readFileSync(path.join(DATA, 'dem_glo30.json'), 'utf8'));
+async function buildTerrain() {
+  const tiff = await fromFile(TERRAIN_TIFF);
+  const image = await tiff.getImage();
+  const [west, , , north] = image.getBoundingBox();
+  const [dx, dy] = image.getResolution();
+  const [values] = await image.readRasters({ samples: [0] });
+  const D = { west, north, dx, dy, nx: image.getWidth(), ny: image.getHeight(), values };
   const { nx, ny } = D;
+  if (D.nx < 2 || D.ny < 2 || values.length !== D.nx * D.ny || dx <= 0 || dy >= 0) {
+    throw new Error(`${TERRAIN_TIFF} has unsupported dimensions, resolution, or raster bands`);
+  }
+  if (D.west > BBOX.west || north + D.ny * dy > BBOX.south ||
+      D.west + D.nx * dx < BBOX.east || north < BBOX.north) {
+    log('warning: bbox extends beyond the elevation TIFF; terrain samples outside its coverage clamp to the nearest edge');
+  }
+  const invalid = values.findIndex((value) => !Number.isFinite(value));
+  if (invalid !== -1) throw new Error(`${TERRAIN_TIFF} band 0 contains a non-finite elevation at sample ${invalid}`);
   const pass = (src, r, pick) => {
     // separable square min/max filter, clamped at the edges
     const tmp = new Float64Array(src.length);
@@ -511,7 +588,7 @@ function buildTerrain() {
     const z = z0 + j * TERRAIN_CELL;
     heights[j * gx + i] = q(sample(LON0 + x / KX, LAT0 - z / KY) - base);
   }
-  return { source: 'Copernicus GLO-30, filtered to bare ground', base, x0, z0, cell: TERRAIN_CELL, nx: gx, nz: gz, heights };
+  return { source: 'Provided elevation GeoTIFF band 0, filtered to bare ground', base, x0, z0, cell: TERRAIN_CELL, nx: gx, nz: gz, heights };
 }
 
 // =====================================================================================================================
@@ -525,12 +602,17 @@ const DRIVABLE = new Set(['motorway', 'trunk', 'primary', 'secondary', 'tertiary
 function buildRoadGraph() {
   const ways = load('osm_roads.json').filter((el) => {
     const t = el.tags;
-    if (el.type !== 'way' || !el.nodes || t.area === 'yes' || t.access === 'private' || t.access === 'no') return false;
+    if (el.type !== 'way' || !el.geometry || el.geometry.length < 2 ||
+        t.area === 'yes' || t.access === 'private' || t.access === 'no') return false;
     if (!DRIVABLE.has(t.highway.replace(/_link$/, ''))) return false;
     // parking aisles and driveways aren't part of the through network
     return !(t.highway === 'service' && /^(parking_aisle|driveway|drive-through)$/.test(t.service || ''));
   });
-  const signals = new Set(load('osm_street.json').filter((el) => el.tags?.highway === 'traffic_signals' || el.tags?.crossing === 'traffic_signals').map((el) => el.id));
+  const coordinateId = ({ lon, lat }) => `${lon.toFixed(7)},${lat.toFixed(7)}`;
+  for (const way of ways) way.nodes = way.geometry.map(coordinateId);
+  const signals = new Set(load('osm_street.json')
+    .filter((el) => el.tags?.highway === 'traffic_signals' || el.tags?.crossing === 'traffic_signals')
+    .map((el) => coordinateId(el)));
   const uses = new Map();
   for (const w of ways) for (const id of new Set(w.nodes)) uses.set(id, (uses.get(id) || 0) + 1);
 
@@ -580,19 +662,19 @@ const areas = buildAreas();
 const { rivers, rail, stations, busStops, termini } = buildWaterRail();
 const landmarks = buildLandmarks(buildings);
 const street = buildStreet();
-const terrain = buildTerrain();
+const terrain = await buildTerrain();
 const roadGraph = buildRoadGraph();
 const [x0, z1] = toWorld(BBOX.west, BBOX.south);
 const [x1, z0] = toWorld(BBOX.east, BBOX.north);
 
 const GEO = {
   frame: {
-    origin: 'Kenyatta International Convention Centre',
+    origin: 'Kigali Convention Centre',
     lat0: LAT0,
     lon0: LON0,
     units: 'm',
     axes: 'x = east, z = south, y = up',
-    drivesOn: 'left',
+    drivesOn: 'right',
     bbox: BBOX,
     extent: { x0: q(x0), x1: q(x1), z0: q(z0), z1: q(z1) }
   },
@@ -611,20 +693,23 @@ const GEO = {
 };
 
 const est = buildings.filter((b) => b.est).length;
+const terrainRange = terrain.heights.reduce(([min, max], height) => [
+  Math.min(min, height),
+  Math.max(max, height)
+], [Infinity, -Infinity]);
 log(`roads ${roads.length} (${roads.filter((r) => r.name).length} named), buildings ${buildings.length} (${buildings.length - est} real heights, ${est} estimated)`);
 log(`areas ${areas.length}, rivers ${rivers.length}, rail ${rail.length}, stations ${stations.length}, bus stops ${busStops.length}, termini ${termini.length}, landmarks ${landmarks.length}`);
 log(`signals ${street.signals.length}, crossings ${street.crossings.length}, lamps ${street.lamps.length}, trees ${street.trees.length}, tree rows ${street.treeRows.length}`);
-log(`terrain ${terrain.nx}×${terrain.nz} at ${terrain.cell} m, ${Math.min(...terrain.heights)}..${Math.max(...terrain.heights)} m around ${terrain.base} m at KICC`);
+log(`terrain ${terrain.nx}×${terrain.nz} at ${terrain.cell} m, ${terrainRange[0]}..${terrainRange[1]} m around ${terrain.base} m at Kigali Convention Centre`);
 log(`road graph: ${roadGraph.nodes.length} nodes (${roadGraph.nodes.filter((n) => n.deg > 2).length} junctions, ${roadGraph.nodes.filter((n) => n.signal).length} signals, ${roadGraph.nodes.filter((n) => n.roundabout).length} on roundabouts), ${roadGraph.links.length} links`);
 log(`extent x ${GEO.frame.extent.x0}..${GEO.frame.extent.x1}, z ${GEO.frame.extent.z0}..${GEO.frame.extent.z1}`);
 
 const header = `// Generated by tools/build-geodata.mjs — do not edit by hand.
-// Nairobi CBD at 1:1 scale. Geographic data © OpenStreetMap contributors, ODbL 1.0 (https://www.openstreetmap.org/copyright).
-// Frame: 1 unit = 1 m, x = east, z = south (north = -z), origin at KICC. Point lists are flat [x0, z0, x1, z1, ...].
+// Kigali around Kigali Convention Centre at 1:1 scale. Geographic data © OpenStreetMap contributors, ODbL 1.0 (https://www.openstreetmap.org/copyright).
+// Frame: 1 unit = 1 m, x = east, z = south (north = -z), origin at Kigali Convention Centre. Point lists are flat [x0, z0, x1, z1, ...].
 // Buildings with est: 1 have an estimated height (OSM has neither height nor building:levels for them).
-// Terrain: GEO.terrain.heights are ground heights in m relative to KICC (GEO.terrain.base m above sea level), row-major
-// from (x0, z0) every cell m; sample them with js/terrain.js. Produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014
-// and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved.
+// Terrain: GEO.terrain.heights are ground heights in m relative to Kigali Convention Centre (GEO.terrain.base m above sea level), row-major
+// from (x0, z0) every cell m; sample them with js/terrain.js. Areas outside the input TIFF use clamped edge elevations.
 `;
 fs.writeFileSync(OUT, `${header}export const GEO = ${JSON.stringify(GEO)};\n`);
 log(`wrote ${OUT} (${(fs.statSync(OUT).size / 1e6).toFixed(2)} MB)`);

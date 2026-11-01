@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { GEO } from './nairobi-geodata.js';
+import { GEO } from './kigali-geodata.js';
 import { terrainGridNormals } from './terrain.js';
 
 // The ground: GEO.terrain's 25 m height grid as one mesh, with what lies flat on it (parks, water, rivers, rail and

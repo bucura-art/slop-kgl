@@ -3,9 +3,10 @@ import { heightAt, terrainNormal } from './terrain.js';
 import { deckTop } from './bridges.js';
 import { band, drape, ROAD_Y } from './street-geometry.js';
 import { createRoadPaintMaterial } from './tsl-materials.js';
+import { GEO } from './kigali-geodata.js';
 
 // Road markings generated from the drivable road network (js/road-network.js), so the paint matches where traffic
-// actually drives and stops. Slop New York's road-paint.js (MIT, © 2026 Mr.doob), with Kenya's markings: broken white
+// actually drives and stops. Slop New York's road-paint.js (MIT, © 2026 Mr.doob), with local markings: broken white
 // centre lines (solid where there are two lanes or more each way, double down a divided road) and lane lines, yellow edge lines along the main
 // roads, stop bars at the signals, broken give-way lines where a minor road or a roundabout's entry meets traffic with
 // priority, and zebra stripes at the crossings: OSM's (traffic.js `zebras`) and each signalised junction's crosswalks
@@ -219,17 +220,18 @@ function buildRoadPaint(scene, network, zebras = []) {
     }
   }
 
-  // Stop bars at the signals and give-way lines where a road meets traffic with priority, across the lanes arriving
-  // (Kenya drives on the left: from the kerb on the left to the centre line), at the stop lines traffic.js uses
+  // Stop bars at the signals and give-way lines where a road meets traffic with priority, across the arriving lanes.
   const rankAt = (n) => Math.max(0, ...n.arms.map((a) => a.rank));
   for (const f of network.edges) {
     const node = f.to;
     if (node.shape || node.lift > 0.5 || f.ring) continue;
     const back = node.out.find((g) => g.to === f.from && g.dx * f.dx + g.dz * f.dz < -0.9);
-    const right = back ? Math.min(f.half - 0.1, f.lanes[f.lanes.length - 1] + 1.8) : f.half - 0.1;
-    if (node.signal) across(f, f.len - 0.35, -f.half + 0.1, right, 0.45, WHITE);
+    const rightDriving = GEO.frame?.drivesOn === 'right';
+    const start = back && rightDriving ? Math.max(-f.half + 0.1, f.lanes[0] - 1.8) : -f.half + 0.1;
+    const end = back && !rightDriving ? Math.min(f.half - 0.1, f.lanes[f.lanes.length - 1] + 1.8) : f.half - 0.1;
+    if (node.signal) across(f, f.len - 0.35, start, end, 0.45, WHITE);
     else if (node.arms.some((a) => a.ring) || rankAt(node) > f.rank) {
-      for (const s of [f.len - 0.3, f.len - 0.75]) across(f, s, -f.half + 0.1, right, 0.2, WHITE, 0.6, 0.5);
+      for (const s of [f.len - 0.3, f.len - 0.75]) across(f, s, start, end, 0.2, WHITE, 0.6, 0.5);
     }
   }
 

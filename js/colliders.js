@@ -1,4 +1,4 @@
-import { GEO } from './nairobi-geodata.js';
+import { GEO } from './kigali-geodata.js';
 import { heightAt } from './terrain.js';
 import { pavementLift } from './street-geometry.js';
 import { footings } from './buildings.js';

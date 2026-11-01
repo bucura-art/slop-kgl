@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { heightAt } from './terrain.js';
 import { FlyCamera } from './fly-camera.js';
+import { GEO } from './kigali-geodata.js';
 
 // Slop New York's cameras.js (MIT, © 2026 Mr.doob), adapted for Nairobi: chase, action, cockpit, fixed-location and
 // aerial cameras, with mouse/touch orbit and zoom, plus the free-flying camera (fly-camera.js). The follow cameras keep
@@ -250,8 +251,9 @@ class CameraSystem {
       }
 
       case 'action': {
-        // Off to the right, over the middle of the road: Kenya drives on the left (New York's camera sits to the left)
-        const sideOffset = -(entity.type === 'car' ? 2.65 : (entity.type === 'helicopter' ? 4.2 : 0.95));
+        // Put the action camera over the driving lanes rather than the kerb.
+        const side = GEO.frame?.drivesOn === 'right' ? 1 : -1;
+        const sideOffset = side * (entity.type === 'car' ? 2.65 : (entity.type === 'helicopter' ? 4.2 : 0.95));
         const backDist = (entity.type === 'car' ? 3.6 : (entity.type === 'helicopter' ? 8.5 : 2.8)) + speedLag;
         const lowY = entity.type === 'helicopter' ? entity.position.y + 1.2 : entity.position.y + 0.92;
 
@@ -275,7 +277,7 @@ class CameraSystem {
         if (entity.type === 'car') {
           fwdOffset = 0.55;
           eyeY = 1.52;
-          rightOffset = 0.36; // the driver's seat of a right-hand drive car
+          rightOffset = GEO.frame?.drivesOn === 'right' ? -0.36 : 0.36;
         } else if (entity.type === 'cyclist') {
           fwdOffset = 0.35;
           eyeY = 1.55;

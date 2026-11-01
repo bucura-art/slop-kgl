@@ -1,6 +1,6 @@
-// Slop New York's tests/cameras.test.cjs (MIT, © 2026 Mr.doob), ported to Nairobi: the same orbit, pinch and teleport
-// checks, on terrain, plus the Nairobi follow cameras' rules (keeping out of buildings, the action camera on the road
-// side for left-hand traffic) and the free camera's hand-over of the keyboard.
+// Slop New York's tests/cameras.test.cjs (MIT, © 2026 Mr.doob), ported to Kigali: the same orbit, pinch and teleport
+// checks, on terrain, plus the follow cameras' rules (keeping out of buildings, the action camera over traffic) and the
+// free camera's hand-over of the keyboard.
 const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const { join } = require('node:path');
@@ -75,7 +75,12 @@ function cameraHarness(entity = {
   window.innerHeight = 900;
   const { CameraSystem } = loadModule(source, {
     globals: { window, document },
-    imports: { 'three/webgpu': { Vector3, PerspectiveCamera }, './terrain.js': { heightAt: ground }, './fly-camera.js': { FlyCamera } }
+    imports: {
+      'three/webgpu': { Vector3, PerspectiveCamera },
+      './terrain.js': { heightAt: ground },
+      './fly-camera.js': { FlyCamera },
+      './kigali-geodata.js': { GEO: { frame: { drivesOn: 'right' } } }
+    }
   });
   const player = { getActiveEntity: () => entity, world: { solidAt }, inputEnabled: true, resetInput() { this.reset = true; } };
   const camera = new CameraSystem(canvas, player);
@@ -264,20 +269,20 @@ function settle(h, seconds = 3) {
   for (let i = 0; i < seconds * 60; i++) h.camera.update(1 / 60, i / 60);
 }
 
-test('the action camera rides on the right, over the middle of the road, as Kenya drives on the left', () => {
+test('the action camera rides on the left, over the middle of right-hand traffic', () => {
   const h = cameraHarness();
   h.camera.setCameraPreset('action', true);
   settle(h);
-  // heading 0 faces +z, so the car's right is -x
-  assert.ok(h.camera.currentPos.x < -2, 'to the right of the car');
+  // heading 0 faces +z, so the car's left is +x
+  assert.ok(h.camera.currentPos.x > 2, 'to the left of the car');
   assert.ok(h.camera.currentPos.z < h.entity.position.z, 'and behind it');
 });
 
-test('the first-person car camera sits in the right-hand driving seat', () => {
+test('the first-person car camera sits in the left-hand driving seat for right-hand traffic', () => {
   const h = cameraHarness();
   h.camera.setCameraPreset('pov', true);
   h.camera.update(1 / 60, 0);
-  close(h.camera.currentPos.x, -0.36);
+  close(h.camera.currentPos.x, 0.36);
   close(h.camera.currentPos.z, 100.55);
 });
 

@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { GEO } from './nairobi-geodata.js';
+import { GEO } from './kigali-geodata.js';
 import { heightAt } from './terrain.js';
 import { isElevated, liftAlong, liftBreaks, linkLength, roadHeight, LAYER_LIFT } from './elevation.js';
 import { createRoadSurfaceMaterial } from './tsl-materials.js';

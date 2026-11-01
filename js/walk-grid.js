@@ -1,4 +1,4 @@
-import { GEO } from './nairobi-geodata.js';
+import { GEO } from './kigali-geodata.js';
 import { isElevated } from './elevation.js';
 
 // Where people can walk. Manhattan's curbs and blocks are surveyed polygons; Nairobi's aren't mapped, so they are

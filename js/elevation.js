@@ -1,4 +1,4 @@
-import { GEO } from './nairobi-geodata.js';
+import { GEO } from './kigali-geodata.js';
 import { heightAt } from './terrain.js';
 
 // How high roads run: the one rule shared by the Expressway decks (bridges.js) and the traffic driving on them

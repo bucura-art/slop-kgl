@@ -1,4 +1,4 @@
-import { GEO } from './nairobi-geodata.js';
+import { GEO } from './kigali-geodata.js';
 import { heightAt, terrainNormal } from './terrain.js';
 import { isElevated, ROAD_Y } from './elevation.js';
 
